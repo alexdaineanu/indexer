@@ -266,7 +266,7 @@ class Indexer:
         data = data.split()[-1]
         results = []
         start = time.time()
-        if self._relevant_suggestions and self._deepindexing:
+        if self._relevant_suggestions or not self._deepindexing:
             if limit:
                 self._cursor.execute(
                     sql.SQL(
@@ -286,8 +286,6 @@ class Indexer:
                     )
                 )
             results = self._cursor.fetchall()
-            if results:
-                results = [i[0] for i in results]
         if self._deepindexing:
             if limit:
                 self._cursor.execute(
@@ -315,9 +313,9 @@ class Indexer:
         fetch_data = self._cursor.fetchall()
         if fetch_data:
             if self._relevant_suggestions:
-                results += [i[0] for i in fetch_data if i[0] not in results]
+                results += [i for i in fetch_data if i not in results]
             else:
-                results = [i[0] for i in fetch_data]
+                results = fetch_data
         stop = time.time()
         if not results:
             print "No suggestion found for {0}".format(data)
@@ -326,4 +324,4 @@ class Indexer:
         if limit:
             results = results[:limit]
         for result in results:
-            yield result
+            yield result[0]

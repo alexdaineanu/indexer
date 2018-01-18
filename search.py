@@ -70,7 +70,7 @@ def classical_search(term):
 
 
 def dynamic_search():
-    indexer = Indexer(deepindexing=True, relevant_suggestions=False)
+    indexer = Indexer(deepindexing=True, relevant_suggestions=True)
     r = ''
     while True:
         suggestions = []
