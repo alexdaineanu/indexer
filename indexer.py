@@ -11,16 +11,17 @@ from config import DB_HOST, DB_PORT, DB_PASSWORD, DB_USER, DB_NAME
 
 
 class Indexer:
-    def __init__(self, diacritics_sensitive=False, deepindexing=False,
+    def __init__(self, diacritics_sensitive=False, deepindexing=False, relevant_suggestions=False,
                  host=DB_HOST, port=DB_PORT, password=DB_PASSWORD, user=DB_USER,
                  database=DB_NAME):
         self._database = psycopg2.connect(host=host, port=port, password=password, user=user,
                                           database=database)
         self._cursor = self._database.cursor()
         self._symbols = '!@#&()|[{}]:;\',?/*`~$^+=<>".-_'
+        self._schema = None
         self._diacritics_sensitive = diacritics_sensitive
         self._deepindexing = deepindexing
-        self._schema = None
+        self._relevant_suggestions = relevant_suggestions
 
     def __del__(self):
         self._database.close()
@@ -263,28 +264,30 @@ class Indexer:
         if self._diacritics_sensitive is False:
             data = self.flatten_diacritics(data)
         data = data.split()[-1]
+        results = []
         start = time.time()
-        if limit:
-            self._cursor.execute(
-                sql.SQL(
-                    '''SELECT DISTINCT(term) FROM index.{table_name} 
-                        WHERE term LIKE {term} LIMIT {limit}''').format(
-                    table_name=sql.Identifier(node),
-                    term=sql.Literal(data + "%"),
-                    limit=sql.Literal(limit)
+        if self._relevant_suggestions and self._deepindexing:
+            if limit:
+                self._cursor.execute(
+                    sql.SQL(
+                        '''SELECT DISTINCT(term) FROM index.{table_name} 
+                            WHERE term LIKE {term} LIMIT {limit}''').format(
+                        table_name=sql.Identifier(node),
+                        term=sql.Literal(data + "%"),
+                        limit=sql.Literal(limit)
+                    )
                 )
-            )
-        else:
-            self._cursor.execute(
-                sql.SQL(
-                    '''SELECT DISTINCT(term) FROM index.{table_name} WHERE term LIKE {term}''').format(
-                    table_name=sql.Identifier(node),
-                    term=sql.Literal(data + "%"),
+            else:
+                self._cursor.execute(
+                    sql.SQL(
+                        '''SELECT DISTINCT(term) FROM index.{table_name} WHERE term LIKE {term}''').format(
+                        table_name=sql.Identifier(node),
+                        term=sql.Literal(data + "%"),
+                    )
                 )
-            )
-        results = self._cursor.fetchall()
-        if results:
-            results = [i[0] for i in results]
+            results = self._cursor.fetchall()
+            if results:
+                results = [i[0] for i in results]
         if self._deepindexing:
             if limit:
                 self._cursor.execute(
@@ -311,7 +314,10 @@ class Indexer:
                 )
         fetch_data = self._cursor.fetchall()
         if fetch_data:
-            results += [i[0] for i in fetch_data if i[0] not in results]
+            if self._relevant_suggestions:
+                results += [i[0] for i in fetch_data if i[0] not in results]
+            else:
+                results = [i[0] for i in fetch_data]
         stop = time.time()
         if not results:
             print "No suggestion found for {0}".format(data)
