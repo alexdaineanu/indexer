@@ -258,7 +258,7 @@ class Indexer:
                 results = results[:limit]
             for result in results:
                 yield result
-            print "Found {0} results in {1} seconds!".format(len(results), stop - start)
+            print "Found {0} results in {1} seconds for {2}!".format(len(results), stop - start, data)
 
     def suggest(self, data, node="_general_index", limit=None):
         if self._diacritics_sensitive is False:
