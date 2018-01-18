@@ -68,7 +68,7 @@ class Indexer:
                       id BIGSERIAL CONSTRAINT PK_ngram_index PRIMARY KEY,
                       term TEXT,
                       inverted_index INT[])''')
-        self._cursor.execute('''CREATE UNIQUE INDEX term_idx_ngram_index ON index._ngram_index USING btree(term)''')
+        self._cursor.execute('''CREATE INDEX term_idx_ngram_index ON index._ngram_index USING hash(term)''')
         if self._schema:
             for node in self._schema:
                 self._cursor.execute(
