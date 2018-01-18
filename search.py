@@ -69,8 +69,9 @@ def classical_search(term):
     print
 
 
-def dynamic_search():
-    indexer = Indexer(deepindexing=True, relevant_suggestions=True)
+def dynamic_search(deepindexing=True, relevant_suggestions=False):
+
+    indexer = Indexer(deepindexing=deepindexing, relevant_suggestions=relevant_suggestions)
     r = ''
     while True:
         suggestions = []
@@ -90,10 +91,13 @@ def dynamic_search():
             for element in r.split()[:-1]:
                 search_element += element + " "
             if suggestions:
-                if r.split()[-1] in suggestions:
-                    search_element += r.split()[-1]
+                if relevant_suggestions:
+                    if r.split()[-1] in suggestions:
+                        search_element += r.split()[-1]
+                    else:
+                        search_element += suggestions[0]
                 else:
-                    search_element += suggestions[0]
+                    search_element += r.split()[-1]
             for i in indexer.search(search_element):
                 print i[1]
                 print '\n' * 4
