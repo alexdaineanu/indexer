@@ -3,10 +3,8 @@ from time import sleep
 import wikipedia
 from requests import ConnectionError
 
-from indexer import Indexer
+from server.indexer import Indexer
 
-indexer = Indexer(deepindexing=True)
-indexer.create_index()
 counter = 0
 
 
@@ -53,5 +51,7 @@ def search():
 
 
 if __name__ == '__main__':
+    indexer = Indexer(deepindexing=True)
+    # indexer.create_index()
     wikipedia.set_lang("ro")
     search()

@@ -7,8 +7,8 @@ import time
 
 import psycopg2
 
-from config import DB_HOST, DB_PORT, DB_PASSWORD, DB_USER, DB_NAME
-from indexer import Indexer
+from server.config import DB_HOST, DB_PORT, DB_PASSWORD, DB_USER, DB_NAME
+from server.indexer import Indexer
 
 
 def search(data, node=None):
@@ -69,16 +69,15 @@ def classical_search(term):
     print
 
 
-def dynamic_search(deepindexing=True, relevant_suggestions=False):
-
-    indexer = Indexer(deepindexing=deepindexing, relevant_suggestions=relevant_suggestions)
+def dynamic_search(deepindexing=True, relevant_suggestions=True, limit=20):
+    indexer = Indexer(deepindexing=deepindexing)
     r = ''
     while True:
         suggestions = []
         os.system("cls")
         print "Search:", r
         if r:
-            for i in indexer.suggest(r, limit=20):
+            for i in indexer.suggest(r, limit=limit, relevant_suggestions=relevant_suggestions):
                 suggestions.append(i)
                 print i
         a = msvcrt.getch()
@@ -97,7 +96,10 @@ def dynamic_search(deepindexing=True, relevant_suggestions=False):
                     else:
                         search_element += suggestions[0]
                 else:
-                    search_element += r.split()[-1]
+                    if len(suggestions) < limit:
+                        search_element += suggestions[0]
+                    else:
+                        search_element += r.split()[-1]
             for i in indexer.search(search_element):
                 print i[1]
                 print '\n' * 4

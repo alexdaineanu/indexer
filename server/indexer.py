@@ -11,23 +11,21 @@ from config import DB_HOST, DB_PORT, DB_PASSWORD, DB_USER, DB_NAME
 
 
 class Indexer:
-    def __init__(self, diacritics_sensitive=False, deepindexing=False, relevant_suggestions=False,
+    def __init__(self, diacritics_sensitive=False, deepindexing=False,
                  host=DB_HOST, port=DB_PORT, password=DB_PASSWORD, user=DB_USER,
                  database=DB_NAME):
         self._database = psycopg2.connect(host=host, port=port, password=password, user=user,
                                           database=database)
         self._cursor = self._database.cursor()
         self._symbols = '!@#&()|[{}]:;\',?/*`~$^+=<>".-_'
-        self._schema = None
         self._diacritics_sensitive = diacritics_sensitive
         self._deepindexing = deepindexing
-        self._relevant_suggestions = relevant_suggestions
 
     def __del__(self):
         self._database.close()
 
     @staticmethod
-    def flatten_diacritics(data):
+    def _flatten_diacritics(data):
         try:
             data = unicode(data).decode('unicode-escape')
         finally:
@@ -61,47 +59,24 @@ class Indexer:
         self._cursor.execute('''
                     CREATE TABLE index._general_index (
                       id BIGSERIAL CONSTRAINT PK_general_index PRIMARY KEY,
-                      term TEXT,
+                      term TEXT CONSTRAINT UNIQUE_general_index_term UNIQUE,
                       inverted_index INT[])''')
         self._cursor.execute('''CREATE UNIQUE INDEX term_idx_general_index ON index._general_index USING btree(term)''')
         self._cursor.execute('''
                     CREATE TABLE index._ngram_index(
                       id BIGSERIAL CONSTRAINT PK_ngram_index PRIMARY KEY,
-                      term TEXT,
+                      term TEXT CONSTRAINT UNIQUE_ngram_index_term UNIQUE,
                       inverted_index INT[])''')
         self._cursor.execute('''CREATE INDEX term_idx_ngram_index ON index._ngram_index USING hash(term)''')
-        if self._schema:
-            for node in self._schema:
-                self._cursor.execute(
-                    sql.SQL('''
-                        CREATE TABLE index.{table_name} (
-                          id BIGSERIAL CONSTRAINT {primary_key_constraint_name} PRIMARY KEY,
-                          term TEXT,
-                          inverted_index INT[])'''
-                            ).format(
-                        table_name=sql.Identifier(node),
-                        primary_key_constraint_name=sql.Identifier("PK_" + node)
-                    )
-                )
-                self._cursor.execute(
-                    sql.SQL('''
-                        CREATE UNIQUE INDEX {index_name} ON index.{table_name} USING btree(term)
-                    ''').format(table_name=sql.Identifier(node), index_name=sql.Identifier("term_idx_" + node))
-                )
-
         self._database.commit()
 
-    def create_index(self, schema=None):
-        if schema:
-            if not isinstance(schema, list):
-                raise Exception("Schema must be a list!")
-        self._schema = schema
+    def create_index(self):
         self.delete_schema()
         self._create_schema()
 
     def _tokenize(self, data):
         if self._diacritics_sensitive is False:
-            data = self.flatten_diacritics(unicode(data))
+            data = self._flatten_diacritics(unicode(data))
         data = re.findall('([a-zA-Z0-9\-\'\"]*)', data)
         data = list(set(data))
         for i in range(len(data)):
@@ -119,63 +94,54 @@ class Indexer:
             self._cursor.execute(
                 sql.SQL(
                     '''INSERT INTO data.original(data, fields, timestamp) 
-                        VALUES({data}, {fields}, {timestamp})''').format(
+                        VALUES({data}, {fields}, {timestamp}) RETURNING id''').format(
                     data=sql.Literal(data),
                     fields=sql.Literal(json.dumps(fields)),
                     timestamp=sql.Literal(time.time())
                 )
             )
+            original_content_id = self._cursor.fetchone()[0]
             self._database.commit()
-            self._cursor.execute('''SELECT MAX(id) FROM data.original''')
-            _id = self._cursor.fetchone()[0]
-            return self._index_node(data, "_general_index", _id)
+            return self._index_data(data, original_content_id)
         except psycopg2.ProgrammingError:
             raise Exception(
                 "There is not index created! Please call create_index() function from indexer before indexing.")
 
-    def _get_term_id_from_table(self, term, table_name):
+    def _index_term_in_node_with_id(self, term, node, original_content_id):
+        self._cursor.execute(
+            sql.SQL(
+                '''INSERT INTO index.{table_name} (term, inverted_index) VALUES({term}, {id_array})
+                    ON CONFLICT(term) DO UPDATE SET 
+                    inverted_index = array_append(index.{table_name}.inverted_index, {id})
+                    RETURNING id'''
+            ).format(
+                table_name=sql.Identifier(node),
+                term=sql.Literal(term),
+                id_array=sql.Literal("{" + str(original_content_id) + "}"),
+                id=sql.Literal(str(original_content_id)),
+            )
+        )
+        inserted_id = self._cursor.fetchone()[0]
+        self._database.commit()
+        return inserted_id
+
+    def _get_id_of_term_from_node(self, term, node):
         self._cursor.execute(
             sql.SQL('''SELECT id FROM index.{table_name} WHERE term = {term}''').format(
-                table_name=sql.Identifier(table_name),
+                table_name=sql.Identifier(node),
                 term=sql.Literal(term)
             )
         )
-        term_exists_in_index = self._cursor.fetchone()
-        try:
-            term_exists_in_index = term_exists_in_index[0]
-        except TypeError:
-            pass
-        return term_exists_in_index
+        return self._cursor.fetchone()
 
-    def _index_term_in_node_with_id(self, term, node, original_content_id):
-        if self._get_term_id_from_table(term, node) is not None:
-            self._cursor.execute(
-                sql.SQL(
-                    '''UPDATE index.{table_name} SET inverted_index = array_append(inverted_index, {id})
-                          WHERE term = {term}''').format(
-                    table_name=sql.Identifier(node),
-                    id=sql.Literal(original_content_id),
-                    term=sql.Literal(term)
-                )
-            )
-        else:
-            self._cursor.execute(
-                sql.SQL(
-                    '''INSERT INTO index.{table_name} (term, inverted_index) VALUES({term}, {id})''').format(
-                    table_name=sql.Identifier(node),
-                    term=sql.Literal(term),
-                    id=sql.Literal("{" + str(original_content_id) + "}")
-                )
-            )
-        self._database.commit()
-
-    def _index_node(self, data, node, original_content_id):
+    def _index_data(self, data, original_content_id):
         counter = 0
         tokenized_data = self._tokenize(data)
         for term in tokenized_data:
             counter += 1
-            ngram_flag = not self._get_term_id_from_table(term, node) and self._deepindexing
-            self._index_term_in_node_with_id(term, node, original_content_id)
+            term_already_exists = self._get_id_of_term_from_node(term, "_general_index")
+            general_index_id = self._index_term_in_node_with_id(term, "_general_index", original_content_id)
+            ngram_flag = not term_already_exists and self._deepindexing
             if ngram_flag:
                 ngrams = []
                 for i in range(1, len(term)):
@@ -184,41 +150,24 @@ class Indexer:
                         ngrams.append(ngram)
                 ngrams.append(term)
                 ngrams = list(set(ngrams))
-                term_id = self._get_term_id_from_table(term, node)
                 for ngram in ngrams:
-                    self._index_term_in_node_with_id(ngram, "_ngram_index", term_id)
-        return counter
-
-    def _parse_json_structure(self, data, _key, original_content_id):
-        counter = 0
-        if _key in self._schema:
-            counter += self._index_node(str(data), _key, original_content_id)
-        if isinstance(data, dict):
-            for key in data.iterkeys():
-                counter += self._parse_json_structure(data[key], key, original_content_id)
-        if isinstance(data, list):
-            for item in data:
-                counter += self._parse_json_structure(item, "", original_content_id)
+                    self._index_term_in_node_with_id(ngram, "_ngram_index", general_index_id)
         return counter
 
     def index(self, data, fields=None):
         start = time.time()
-        if isinstance(data, str):
+        if isinstance(data, basestring):
             data = data.strip()
-        if len(data) == 0:
+        else:
             return 0
         counter = self._full_text_index(data, fields)
-        if self._schema:
-            self._cursor.execute('''SELECT MAX(id) FROM data.original''')
-            _id = self._cursor.fetchone()[0]
-            counter += self._parse_json_structure(data, "", _id)
         stop = time.time()
         print "TOOK " + str(stop - start) + " SECONDS!"
         return counter
 
     def search(self, data, node="_general_index", limit=None):
         if self._diacritics_sensitive is False:
-            data = self.flatten_diacritics(data)
+            data = self._flatten_diacritics(data)
         print "Searching {0}...".format(data)
         data = data.split()
         start = time.time()
@@ -260,33 +209,24 @@ class Indexer:
                 yield result
             print "Found {0} results in {1} seconds for {2}!".format(len(results), stop - start, data)
 
-    def suggest(self, data, node="_general_index", limit=None):
+    def suggest(self, data, node="_general_index", limit=None, relevant_suggestions=True):
         if self._diacritics_sensitive is False:
-            data = self.flatten_diacritics(data)
+            data = self._flatten_diacritics(data)
         data = data.split()[-1]
         results = []
         start = time.time()
-        if self._relevant_suggestions or not self._deepindexing:
+        if not self._deepindexing:
+            s = sql.SQL('''SELECT DISTINCT(term) FROM index.{table_name}
+                            WHERE term LIKE {term}''').format(
+                table_name=sql.Identifier(node),
+                term=sql.Literal(data + "%"),
+                limit=sql.Literal(limit)
+            )
             if limit:
-                self._cursor.execute(
-                    sql.SQL(
-                        '''SELECT DISTINCT(term) FROM index.{table_name} 
-                            WHERE term LIKE {term} LIMIT {limit}''').format(
-                        table_name=sql.Identifier(node),
-                        term=sql.Literal(data + "%"),
-                        limit=sql.Literal(limit)
-                    )
-                )
-            else:
-                self._cursor.execute(
-                    sql.SQL(
-                        '''SELECT DISTINCT(term) FROM index.{table_name} WHERE term LIKE {term}''').format(
-                        table_name=sql.Identifier(node),
-                        term=sql.Literal(data + "%"),
-                    )
-                )
+                s += sql.SQL(''' LIMIT {limit}''').format(limit=sql.Literal(limit))
+            self._cursor.execute(s)
             results = self._cursor.fetchall()
-        if self._deepindexing:
+        else:
             if limit:
                 self._cursor.execute(
                     sql.SQL(
@@ -312,7 +252,7 @@ class Indexer:
                 )
         fetch_data = self._cursor.fetchall()
         if fetch_data:
-            if self._relevant_suggestions:
+            if relevant_suggestions:
                 results += [i for i in fetch_data if i not in results]
             else:
                 results = fetch_data

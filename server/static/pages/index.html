@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+</head>
+<body>
+
+<h1>Welcome</h1>
+
+<label for="searchInput">Search:</label>
+<input id="searchInput" type="text">
+<div id="dataList">
+    <h1>Suggestions:</h1>
+</div>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+<script>
+
+    $(document).ready(function (e) {
+        $("#searchInput").keyup(function (e) {
+            if (e.which === 13) {
+                e.preventDefault();
+                search();
+            }
+            else {
+                if ($("#searchInput").val())
+                    suggestion();
+                else
+                    $("p", "#dataList").remove();
+            }
+        })
+    });
+
+    function search(){
+        $("p", "#dataList").remove();
+        $("h2", "#dataList").remove();
+        var dataList = $("#dataList");
+        var data = $("#searchInput").val();
+        dataList.append("<h2>Search results:</h2>");
+        $.ajax({
+            async: false,
+            url: "/api/search/" + data,
+            success: function (data) {
+                var row = "";
+                $.each(data.results, function (index, item) {
+                    row = '<p>' + item[1].toString().slice(0, 100) + "..." + '</p>';
+                    dataList.append(row);
+                })
+
+            },
+            error: function (data) {
+                console.log("error");
+                console.log(data);
+            }
+        });
+    }
+
+    function suggestion() {
+        $("p", "#dataList").remove();
+        $("h2", "#dataList").remove();
+        var data = $("#searchInput").val();
+        $.ajax({
+            async: false,
+            url: "/api/suggestions/" + data,
+            success: function (data) {
+                var row = "";
+                $.each(data.suggestions, function (index, item) {
+                    row = '<p>' + item + '</p>';
+                    $("#dataList").append(row);
+                })
+
+            },
+            error: function (data) {
+                console.log("error");
+                console.log(data);
+            }
+        });
+    }
+</script>
+</body>
+</html>
