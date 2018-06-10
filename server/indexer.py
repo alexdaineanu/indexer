@@ -165,6 +165,78 @@ class Indexer:
         print "TOOK " + str(stop - start) + " SECONDS!"
         return counter
 
+    def remove_content_from_index(self, original_id):
+        self._cursor.execute(
+            sql.SQL('''
+            SELECT data FROM data.original WHERE id = {id}
+        ''').format(id=sql.Literal(original_id))
+        )
+        content = self._cursor.fetchone()
+        if not content:
+            return False
+        content = content[0]
+        tokenized_data = self._tokenize(content)
+        for term in tokenized_data:
+            self._cursor.execute(
+                sql.SQL('''
+                    UPDATE index._general_index 
+                    SET inverted_index = ARRAY_REMOVE(inverted_index, {original_id}) 
+                    WHERE term = {term}
+                    RETURNING id
+                ''').format(
+                    original_id=sql.Literal(original_id),
+                    term=sql.Literal(term)
+                )
+            )
+            general_index_id = self._cursor.fetchone()[0]
+            self._cursor.execute(
+                sql.SQL('''
+                            DELETE FROM index._general_index
+                            WHERE id = {general_index_id}
+                            AND ARRAY_NDIMS(inverted_index) IS NULL
+                        ''').format(
+                    general_index_id=sql.Literal(general_index_id),
+                )
+            )
+            if self._deepindexing:
+                ngrams = []
+                for i in range(1, len(term)):
+                    for j in range(len(term) - i + 1):
+                        ngram = term[j:j + i]
+                        ngrams.append(ngram)
+                ngrams.append(term)
+                ngrams = list(set(ngrams))
+                for ngram in ngrams:
+                    self._cursor.execute(
+                        sql.SQL('''
+                            UPDATE index._ngram_index 
+                            SET inverted_index = ARRAY_REMOVE(inverted_index, {general_index_id}) 
+                            WHERE term = {term}
+                            RETURNING id
+                        ''').format(
+                            general_index_id=sql.Literal(general_index_id),
+                            term=sql.Literal(ngram)
+                        )
+                    )
+                    ngram_index_id = self._cursor.fetchone()[0]
+                    self._cursor.execute(
+                        sql.SQL('''
+                                DELETE FROM index._ngram_index
+                                WHERE id = {ngram_index_id}
+                                AND ARRAY_NDIMS(inverted_index) IS NULL
+                            ''').format(
+                            ngram_index_id=sql.Literal(ngram_index_id),
+                        )
+                    )
+        self._cursor.execute(
+            sql.SQL(
+                '''DELETE FROM data.original WHERE id = {original_id}'''
+            ).format(
+                original_id=sql.Literal(original_id)
+            )
+        )
+        self._database.commit()
+
     def search(self, data, node="_general_index", limit=None):
         if self._diacritics_sensitive is False:
             data = self._flatten_diacritics(data)
@@ -265,3 +337,11 @@ class Indexer:
             results = results[:limit]
         for result in results:
             yield result[0]
+
+
+if __name__ == '__main__':
+    indexer = Indexer(deepindexing=True)
+    # indexer.create_index()
+    # indexer.index("gigel are prune", "da")
+    # indexer.index("ana are mere", "da")
+    indexer.remove_content_from_index(2)
