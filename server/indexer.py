@@ -3,9 +3,12 @@ import json
 import re
 import time
 import unicodedata
+import urllib2
 
 import psycopg2
 from psycopg2 import sql
+
+import html2text
 
 from config import DB_HOST, DB_PORT, DB_PASSWORD, DB_USER, DB_NAME
 
@@ -75,6 +78,10 @@ class Indexer:
         self._create_schema()
 
     def _tokenize(self, data):
+        try:
+            data = data.decode("utf8")
+        except UnicodeEncodeError:
+            pass
         if self._diacritics_sensitive is False:
             data = self._flatten_diacritics(unicode(data))
         data = re.findall('([a-zA-Z0-9\-\'\"]*)', data)
@@ -165,6 +172,13 @@ class Indexer:
         print "TOOK " + str(stop - start) + " SECONDS!"
         return counter
 
+    def index_web_page(self, url):
+        f = urllib2.urlopen(url)
+        content = f.read()
+        h = html2text.HTML2Text()
+        result = h.handle(content.decode("utf8"))
+        self.index(result, {"url": url})
+
     def remove_content_from_index(self, original_id):
         self._cursor.execute(
             sql.SQL('''
@@ -188,7 +202,10 @@ class Indexer:
                     term=sql.Literal(term)
                 )
             )
-            general_index_id = self._cursor.fetchone()[0]
+            general_index_id = self._cursor.fetchone()
+            if not general_index_id:
+                continue
+            general_index_id = general_index_id[0]
             self._cursor.execute(
                 sql.SQL('''
                             DELETE FROM index._general_index
@@ -218,7 +235,10 @@ class Indexer:
                             term=sql.Literal(ngram)
                         )
                     )
-                    ngram_index_id = self._cursor.fetchone()[0]
+                    ngram_index_id = self._cursor.fetchone()
+                    if not ngram_index_id:
+                        continue
+                    ngram_index_id = ngram_index_id[0]
                     self._cursor.execute(
                         sql.SQL('''
                                 DELETE FROM index._ngram_index
@@ -341,7 +361,8 @@ class Indexer:
 
 if __name__ == '__main__':
     indexer = Indexer(deepindexing=True)
-    # indexer.create_index()
-    # indexer.index("gigel are prune", "da")
-    # indexer.index("ana are mere", "da")
-    indexer.remove_content_from_index(2)
+    indexer.create_index()
+    indexer.index("gigel are prune", "da")
+    indexer.index("ana are mere", "da")
+    # indexer.remove_content_from_index(2)
+    indexer.index_web_page("http://www.wikipedia.com")
